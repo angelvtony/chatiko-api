@@ -20,3 +20,20 @@ const userSchema = new mongoose.Schema(
 );
 
 module.exports = mongoose.model("User", userSchema);
+
+// ------------------
+// Preference model
+// ------------------
+const preferenceSchema = new mongoose.Schema(
+  {
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true
+    },
+    preference: String
+  },
+  { timestamps: true }
+  );
+  
+  const Preference = mongoose.model("Preference", preferenceSchema);
