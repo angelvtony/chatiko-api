@@ -14,7 +14,10 @@ const userSchema = new mongoose.Schema(
     password: {
       type: String,
       required: true
-    }
+    },
+    latitude: Number,      // new
+    longitude: Number,     // new
+    isOnline: { type: Boolean, default: false }, // new
   },
   { timestamps: true }
 );
