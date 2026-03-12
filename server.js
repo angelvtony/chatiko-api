@@ -5,13 +5,16 @@ const cors = require("cors");
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const authMiddleware = require("./middleware/auth");
+const authMiddleware = require("./middleware/auth"); // your auth middleware
+const debug = require('debug')('chatiko:app'); 
 
 const app = express();
 
 // ------------------
-// User model
+// Models
 // ------------------
+
+// User model
 const userSchema = new mongoose.Schema(
   {
     username: { type: String, required: true },
@@ -23,12 +26,9 @@ const userSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
-
 const User = mongoose.model("User", userSchema);
 
-// ------------------
 // Preference model
-// ------------------
 const preferenceSchema = new mongoose.Schema(
   {
     userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
@@ -36,8 +36,18 @@ const preferenceSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
-
 const Preference = mongoose.model("Preference", preferenceSchema);
+
+// Message model
+const messageSchema = new mongoose.Schema(
+  {
+    senderId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+    receiverId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+    message: { type: String, required: true }
+  },
+  { timestamps: true }
+);
+const Message = mongoose.model("Message", messageSchema);
 
 // ------------------
 // Middleware
@@ -55,13 +65,62 @@ mongoose.connect(MONGO_URI)
   .catch(err => console.error("❌ MongoDB connection error:", err));
 
 // ------------------
+// HTTP Server + Socket.IO
+// ------------------
+const http = require("http");
+const { Server } = require("socket.io");
+
+const server = http.createServer(app);
+
+const io = new Server(server, {
+  cors: {
+    origin: "*"
+  }
+});
+
+// ------------------
+// Socket.IO Chat Logic
+// ------------------
+io.on("connection", (socket) => {
+  console.log("🟢 User connected:", socket.id);
+
+  // Join user room
+  socket.on("join", (userId) => {
+    socket.join(userId);
+    console.log("User joined room:", userId);
+  });
+
+  // Send message
+  socket.on("sendMessage", async (data) => {
+    try {
+      const { senderId, receiverId, message } = data;
+
+      // Save message in MongoDB
+      const savedMessage = await Message.create({ senderId, receiverId, message });
+
+      // Emit message to receiver
+      io.to(receiverId).emit("receiveMessage", savedMessage);
+
+      // Emit back to sender (for instant UI update)
+      io.to(senderId).emit("receiveMessage", savedMessage);
+    } catch (err) {
+      console.error(err);
+    }
+  });
+
+  socket.on("disconnect", () => {
+    console.log("🔴 User disconnected:", socket.id);
+  });
+});
+
+// ------------------
 // Routes
 // ------------------
 app.get("/", (req, res) => {
   res.send("Chatiko API running 🚀");
 });
 
-// Signup endpoint (optionally accept latitude/longitude)
+// Signup
 app.post("/api/auth/signup", async (req, res) => {
   try {
     const { username, email, password, latitude, longitude } = req.body;
@@ -95,7 +154,7 @@ app.post("/api/auth/signup", async (req, res) => {
   }
 });
 
-// Login endpoint
+// Login
 app.post("/api/auth/login", async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -123,17 +182,18 @@ app.get("/api/protected", authMiddleware, (req, res) => {
   res.json({ message: "You are authenticated", user: req.user });
 });
 
-// Save preferences
+// Save/update preferences
 app.post("/api/preferences", authMiddleware, async (req, res) => {
   try {
     const { preference } = req.body;
 
     if (!preference) return res.status(400).json({ message: "Preference is required" });
 
-    const savedPreference = await Preference.create({
-      userId: req.user.id,
-      preference
-    });
+    const savedPreference = await Preference.findOneAndUpdate(
+      { userId: req.user.id },
+      { preference },
+      { new: true, upsert: true }
+    );
 
     res.status(200).json({ message: "Preference saved successfully", preference: savedPreference });
   } catch (err) {
@@ -168,18 +228,22 @@ app.post("/api/users/:id/location", authMiddleware, async (req, res) => {
 // Get nearby users
 app.get("/api/users/nearby", authMiddleware, async (req, res) => {
   try {
-    const { latitude, longitude, radius = 1000 } = req.query; // meters
+    const { latitude, longitude, radius = 1000 } = req.query;
 
     if (!latitude || !longitude) return res.status(400).json({ message: "Latitude and longitude required" });
 
     const users = await User.find({ latitude: { $exists: true }, longitude: { $exists: true }, isOnline: true });
 
-    const nearby = users.filter(user => {
-      const toRad = (x) => x * Math.PI / 180;
-      const R = 6371000; // Earth radius in meters
-      const dLat = toRad(user.latitude - latitude);
-      const dLon = toRad(user.longitude - longitude);
-      const lat1 = toRad(latitude);
+    const nearby = [];
+    const toRad = x => x * Math.PI / 180;
+    const R = 6371000; // Earth radius in meters
+    const userLat = parseFloat(latitude);
+    const userLng = parseFloat(longitude);
+
+    for (const user of users) {
+      const dLat = toRad(user.latitude - userLat);
+      const dLon = toRad(user.longitude - userLng);
+      const lat1 = toRad(userLat);
       const lat2 = toRad(user.latitude);
 
       const a = Math.sin(dLat / 2) ** 2 +
@@ -187,8 +251,19 @@ app.get("/api/users/nearby", authMiddleware, async (req, res) => {
       const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
       const distance = R * c;
 
-      return distance <= radius;
-    });
+      if (distance <= radius) {
+        const pref = await Preference.findOne({ userId: user._id });
+
+        nearby.push({
+          id: user._id,
+          username: user.username,
+          latitude: user.latitude,
+          longitude: user.longitude,
+          isOnline: user.isOnline,
+          mood: pref?.preference || "Normal"
+        });
+      }
+    }
 
     res.json(nearby);
   } catch (err) {
@@ -197,8 +272,31 @@ app.get("/api/users/nearby", authMiddleware, async (req, res) => {
   }
 });
 
+// Get chat messages between two users
+app.get("/api/messages/:userId", authMiddleware, async (req, res) => {
+  try {
+    const currentUser = req.user.id;
+    const otherUser = req.params.userId;
+
+    const messages = await Message.find({
+      $or: [
+        { senderId: currentUser, receiverId: otherUser },
+        { senderId: otherUser, receiverId: currentUser }
+      ]
+    }).sort({ createdAt: 1 });
+
+    res.json(messages);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ------------------
-// Start server
+// Start Server
 // ------------------
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+
+server.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});
