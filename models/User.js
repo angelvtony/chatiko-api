@@ -59,6 +59,10 @@ const messageSchema = new mongoose.Schema(
     message: {
       type: String,
       required: true
+    },
+    reaction: {
+      type: String,
+      default: null
     }
   },
   { timestamps: true }

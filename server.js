@@ -43,7 +43,8 @@ const messageSchema = new mongoose.Schema(
   {
     senderId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     receiverId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-    message: { type: String, required: true }
+    message: { type: String, required: true },
+    reaction: { type: String, default: null}
   },
   { timestamps: true }
 );
@@ -94,19 +95,48 @@ io.on("connection", (socket) => {
   socket.on("sendMessage", async (data) => {
     try {
       const { senderId, receiverId, message } = data;
-
-      // Save message in MongoDB
-      const savedMessage = await Message.create({ senderId, receiverId, message });
-
-      // Emit message to receiver
+  
+      // Always include reaction as null
+      const savedMessage = await Message.create({
+        senderId,
+        receiverId,
+        message,
+        reaction: null
+      });
+  
+      // Emit the message to both users
       io.to(receiverId).emit("receiveMessage", savedMessage);
-
-      // Emit back to sender (for instant UI update)
       io.to(senderId).emit("receiveMessage", savedMessage);
+  
     } catch (err) {
-      console.error(err);
+      console.error("sendMessage error:", err);
     }
   });
+
+  socket.on("reactMessage", async (data) => {
+    console.log("Reaction received:", data);
+    try {
+      const { messageId, reaction, senderId, receiverId } = data;
+  
+      // Update reaction and return the updated document
+      const updatedMessage = await Message.findByIdAndUpdate(
+        messageId,
+        { reaction },
+        { returnDocument: 'after' }  // <-- use recommended option
+      );
+  
+      if (updatedMessage) {
+        // Emit updated message to both sender and receiver
+        io.to(senderId).emit("messageReaction", updatedMessage);
+        io.to(receiverId).emit("messageReaction", updatedMessage);
+        console.log("Updated message:", updatedMessage);
+      }
+  
+    } catch (err) {
+      console.error("reactMessage error:", err);
+    }
+  });
+  
 
   socket.on("disconnect", () => {
     console.log("🔴 User disconnected:", socket.id);
