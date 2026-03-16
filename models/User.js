@@ -18,6 +18,7 @@ const userSchema = new mongoose.Schema(
     latitude: Number,      // new
     longitude: Number,     // new
     isOnline: { type: Boolean, default: false }, // new
+    publicKey: { type: String },
   },
   { timestamps: true }
 );

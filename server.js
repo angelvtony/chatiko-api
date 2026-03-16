@@ -338,6 +338,51 @@ app.get("/api/messages/:userId", authMiddleware, async (req, res) => {
   }
 });
 
+// Save user public key
+app.post("/api/users/publicKey", authMiddleware, async (req,res)=>{
+
+  try{
+ 
+   const userId = req.user.id
+   const { publicKey } = req.body
+ 
+   await User.findByIdAndUpdate(
+     userId,
+     { publicKey }
+   )
+ 
+   res.json({ message:"Public key saved" })
+ 
+  }catch(err){
+ 
+   res.status(500).json({ error:err.message })
+ 
+  }
+ 
+ })
+
+
+// Get user public key
+app.get("/api/users/:id/publicKey", authMiddleware, async (req,res)=>{
+
+  try{
+ 
+   const user = await User.findById(req.params.id)
+ 
+   if(!user){
+    return res.status(404).json({message:"User not found"})
+   }
+ 
+   res.json({
+     publicKey:user.publicKey
+   })
+ 
+  }catch(err){
+   res.status(500).json({error:err.message})
+  }
+ 
+ })
+
 // ------------------
 // Start Server
 // ------------------
