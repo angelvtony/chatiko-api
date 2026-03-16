@@ -136,7 +136,23 @@ io.on("connection", (socket) => {
       console.error("reactMessage error:", err);
     }
   });
+
+  // Delete message
+  socket.on("deleteMessage", async (data) => {
+    try {
+      const { messageId, senderId, receiverId } = data;
   
+      console.log("Deleting message:", messageId);
+  
+      await Message.findByIdAndDelete(messageId);
+  
+      io.to(senderId).emit("messageDeleted", { messageId });
+      io.to(receiverId).emit("messageDeleted", { messageId });
+  
+    } catch (err) {
+      console.error("deleteMessage error:", err);
+    }
+  });
 
   socket.on("disconnect", () => {
     console.log("🔴 User disconnected:", socket.id);
