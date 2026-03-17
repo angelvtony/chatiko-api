@@ -22,7 +22,8 @@ const userSchema = new mongoose.Schema(
     password: { type: String, required: true },
     latitude: { type: Number, default: null },
     longitude: { type: Number, default: null },
-    isOnline: { type: Boolean, default: false }
+    isOnline: { type: Boolean, default: false },
+    publicKey: { type: String }
   },
   { timestamps: true }
 );
@@ -106,7 +107,10 @@ io.on("connection", (socket) => {
   
       // Emit the message to both users
       io.to(receiverId).emit("receiveMessage", savedMessage);
-      io.to(senderId).emit("receiveMessage", savedMessage);
+      io.to(senderId).emit("receiveMessage", {
+      ...savedMessage.toObject(),
+      messagePlain: message // original text for sender
+  });
   
     } catch (err) {
       console.error("sendMessage error:", err);
