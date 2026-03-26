@@ -45,7 +45,12 @@ const messageSchema = new mongoose.Schema(
     senderId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     receiverId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     message: { type: String, required: true },
-    reaction: { type: String, default: null}
+    reaction: { type: String, default: null },
+    status: { 
+      type: String, 
+      enum: ["sent", "delivered", "read"], 
+      default: "sent" 
+    }
   },
   { timestamps: true }
 );
@@ -102,19 +107,49 @@ io.on("connection", (socket) => {
         senderId,
         receiverId,
         message,
-        reaction: null
+        reaction: null,
+        status: "sent"
       });
   
       // Emit the message to both users
       io.to(receiverId).emit("receiveMessage", savedMessage);
+
+      // Update to delivered
+      savedMessage.status = "delivered";
+      await savedMessage.save();
+
       io.to(senderId).emit("receiveMessage", {
       ...savedMessage.toObject(),
       messagePlain: message // original text for sender
-  });
+    });
+    io.to(senderId).emit("messageStatus", {
+      messageId: savedMessage._id,
+      status: "delivered"
+    });
   
     } catch (err) {
       console.error("sendMessage error:", err);
     }
+  });
+
+  socket.on("markAsRead", async ({ senderId, receiverId }) => {
+    const messages = await Message.find({
+      senderId,
+      receiverId,
+      status: { $ne: "read" }
+    });
+  
+    const ids = messages.map(m => m._id);
+  
+    await Message.updateMany(
+      { _id: { $in: ids } },
+      { status: "read" }
+    );
+  
+    // 🔥 send exact message IDs
+    io.to(senderId).emit("messagesRead", {
+      messageIds: ids
+    });
   });
 
   socket.on("reactMessage", async (data) => {
